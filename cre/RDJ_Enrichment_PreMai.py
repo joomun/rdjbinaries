@@ -322,48 +322,60 @@ def correct_format_amount(amount_bytes: bytes, cur_decimal_nr: str) -> bytes:
     
     if cur_dec == amt_dec:
         # Same decimal positions - copy as is
-        o_str_amount[0:1] = i_str_amount[0].encode('latin1')  # Sign
-        # Copy amount starting from position 1 + (3 - cur_dec)
+        # memcpy(o_strAmount, i_strAmount, 1);  // Sign
+        o_str_amount[0:1] = i_str_amount[0].encode('latin1')
+        # memcpy(o_strAmount + 1, i_strAmount + 1 + 3 - atoi(l_strCurDecimalNr), AMOUNT_FIELD_LENGTH - 3 + atoi(l_strCurDecimalNr));
         src_start = 1 + (3 - cur_dec)
-        if src_start < len(i_str_amount):
-            copy_len = min(AMOUNT_FIELD_LENGTH - (3 - cur_dec), len(i_str_amount) - src_start)
-            o_str_amount[1:1 + copy_len] = i_str_amount[src_start:src_start + copy_len].encode('latin1')
-        o_str_amount[1 + AMOUNT_FIELD_LENGTH:] = AMOUNT_DECIMAL_NR.encode('latin1')
+        copy_len = AMOUNT_FIELD_LENGTH - 3 + cur_dec
+        if src_start < len(i_str_amount) and copy_len > 0:
+            src_end = min(src_start + copy_len, len(i_str_amount))
+            o_str_amount[1:1 + (src_end - src_start)] = i_str_amount[src_start:src_end].encode('latin1')
+        # memcpy(o_strAmount + 1 + AMOUNT_FIELD_LENGTH, AMOUNT_DECIMAL_NR, 1);
+        o_str_amount[1 + AMOUNT_FIELD_LENGTH:1 + AMOUNT_FIELD_LENGTH + 1] = AMOUNT_DECIMAL_NR.encode('latin1')
     
     elif cur_dec > amt_dec:
         # Currency has more decimals
         diff = cur_dec - amt_dec
-        o_str_amount[0:1] = i_str_amount[0].encode('latin1')  # Sign
-        # Copy from position 1 + diff
+        # memcpy(o_strAmount, i_strAmount, 1);  // Sign
+        o_str_amount[0:1] = i_str_amount[0].encode('latin1')
+        # memcpy(o_strAmount + 1, i_strAmount + 1 + l_iDiffCurDecimalNr, AMOUNT_FIELD_LENGTH - l_iDiffCurDecimalNr);
         src_start = 1 + diff
-        if src_start < len(i_str_amount):
-            copy_len = min(AMOUNT_FIELD_LENGTH - diff, len(i_str_amount) - src_start)
-            o_str_amount[1:1 + copy_len] = i_str_amount[src_start:src_start + copy_len].encode('latin1')
-        o_str_amount[1 + AMOUNT_FIELD_LENGTH:] = AMOUNT_DECIMAL_NR.encode('latin1')
+        copy_len = AMOUNT_FIELD_LENGTH - diff
+        if src_start < len(i_str_amount) and copy_len > 0:
+            src_end = min(src_start + copy_len, len(i_str_amount))
+            o_str_amount[1:1 + (src_end - src_start)] = i_str_amount[src_start:src_end].encode('latin1')
+        # memcpy(o_strAmount + 1 + AMOUNT_FIELD_LENGTH, AMOUNT_DECIMAL_NR, 1);
+        o_str_amount[1 + AMOUNT_FIELD_LENGTH:1 + AMOUNT_FIELD_LENGTH + 1] = AMOUNT_DECIMAL_NR.encode('latin1')
     
     else:
         # Currency has fewer decimals - need to round
         diff = amt_dec - cur_dec
         exp = 3 - cur_dec
         
-        # Extract amount without sign and decimal indicator
+        # memcpy(l_strAmount, i_strAmount + 1, AMOUNT_FIELD_LENGTH);
         l_str_amount = i_str_amount[1:1 + AMOUNT_FIELD_LENGTH]
         
         try:
+            # Numerator = atof(l_strAmount);
             numerator = float(l_str_amount)
+            # Denominator = pow((double)10, (double)l_iDiffCurDecimalNr);
             denominator = pow(10, diff)
+            # Ratio = ROUND((double)(Numerator / Denominator));
             ratio = round_custom(numerator / denominator)
             
-            # Format as 18-digit number
+            # sprintf(l_strAmount, "%018.0f", Ratio);
             l_str_amount_formatted = f"{ratio:018.0f}"
             
-            o_str_amount[0:1] = i_str_amount[0].encode('latin1')  # Sign
-            # Copy from position exp
+            # memcpy(o_strAmount, i_strAmount, 1);  // Sign
+            o_str_amount[0:1] = i_str_amount[0].encode('latin1')
+            # memcpy(o_strAmount + 1, l_strAmount + (int)Exp, AMOUNT_FIELD_LENGTH - (int)Exp);
             copy_start = int(exp)
-            if copy_start < len(l_str_amount_formatted):
-                copy_len = min(AMOUNT_FIELD_LENGTH - int(exp), len(l_str_amount_formatted) - copy_start)
-                o_str_amount[1:1 + copy_len] = l_str_amount_formatted[copy_start:copy_start + copy_len].encode('latin1')
-            o_str_amount[1 + AMOUNT_FIELD_LENGTH:] = AMOUNT_DECIMAL_NR.encode('latin1')
+            copy_len = AMOUNT_FIELD_LENGTH - int(exp)
+            if copy_start < len(l_str_amount_formatted) and copy_len > 0:
+                copy_end = min(copy_start + copy_len, len(l_str_amount_formatted))
+                o_str_amount[1:1 + (copy_end - copy_start)] = l_str_amount_formatted[copy_start:copy_end].encode('latin1')
+            # memcpy(o_strAmount + 1 + AMOUNT_FIELD_LENGTH, AMOUNT_DECIMAL_NR, 1);
+            o_str_amount[1 + AMOUNT_FIELD_LENGTH:1 + AMOUNT_FIELD_LENGTH + 1] = AMOUNT_DECIMAL_NR.encode('latin1')
         except:
             o_str_amount = bytearray(amount_bytes.ljust(20))
     

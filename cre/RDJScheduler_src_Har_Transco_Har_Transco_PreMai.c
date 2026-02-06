@@ -11,7 +11,7 @@
  *         Har_Transco_PreMai <Parameter 1> <Parameter 2>
  *       - Parameter 1 : Input File                         [Mandatory]
  *       - Parameter 2 : Accounting Date in YYYYMMDD Format [Mandatory]
- *		 - Parameter 3 : Site [if "NULL" : Default Site is CACIB+SST (PPCO dodge CACIB) / If "CASA" : Site is CASA (PPCO dodge CASA)]
+ *		 - Parameter 3 : Site [if "NULL" : Default Site is CACIB+SST+LCL (PPCO dodge CACIB) / If "CASA" : Site is CASA (PPCO dodge CASA)]
  *
  *=======================================================================================
  *
@@ -113,6 +113,7 @@
 #define EMPTY_CURRENCY					"   "
 
 char RefRcaCpt_Record[REF_RCA_CPT_RECORD_LENGTH];
+char ENTITY[10];
 char RefCurrency_Record[REF_CURRENCY_RECORD_LENGTH];
 char *strConfigurationDirectory			= NULL;
 char strRCA_CPT_FILE_NAME[18+1];
@@ -1915,7 +1916,7 @@ int Create_Output_Record(const char *i_InputRecord, char *o_OutputRecord)
 		if (strcmp(tabFieldOfRecord[l_iIdx].strFieldName, "MAI_CPT_IMP") == 0)
 		{
 			// HB_IMPUTATION, TOP_INT_EXT and TVA
-			// printf(" - [Create_Output_Record] - Dodge Account = %s.\n", l_strInputField);
+			 // printf(" - [Create_Output_Record] - Dodge Account = %s.\n", l_strInputField);
 			if (FindElementInCOMPTE_DODGEHashArrayTable(l_strInputField, &l_lPositXHashKey, &l_lPositYHashKey))
 			{
 				strcpy(l_strHB_IMPUTATION, COMPTE_DODGEHashArray[l_lPositXHashKey].stElt[l_lPositYHashKey].strHB_IMPUTATION);
@@ -1928,6 +1929,20 @@ int Create_Output_Record(const char *i_InputRecord, char *o_OutputRecord)
 			}
 			memcpy(l_strIdLot + DATE_LENGTH, l_strHB_IMPUTATION, CD_TYPIMP_FIELD_LENGTH);
 			memcpy(l_strIdLot + DATE_LENGTH + CD_TYPIMP_FIELD_LENGTH, l_strTOP_INT_EXT, CD_TYPEI_FIELD_LENGTH);
+			if (strcmp(ENTITY,"LCL") == 0)
+			{
+				if (strcmp(l_strInputField,"530001001") == 0 || strcmp(l_strInputField,"530001002") == 0  )
+				{
+					printf("Modification Compte DODGE %s pour ENTITY : LCL en 530001003", l_strInputField);
+					strcpy(l_strInputField,"530001003");
+					memcpy(o_OutputRecord + tabFieldOfRecord[19].iFieldStartPosOutput, l_strInputField, 9);
+				}
+				/*else
+				{
+					printf("Pas de modification Compte DODGE %s pour ENTITY : LCL en 530001003", l_strInputField);
+				}*/
+
+			}
 		}
 		// REF_OPE
 		if (strcmp(tabFieldOfRecord[l_iIdx].strFieldName, "MAI_REF_OPE") == 0)
@@ -2147,7 +2162,6 @@ int BuildOutputRecordFormat()
  *                              Main  Function
  * =============================================================================
  */
- //argc - argument count, argv - argument vector: array of character pointers listing all arguments (Argv[0] = name of the program and argv[...] command-line arguments
 main(int argc, char *argv[])
 {
 	FILE *InputFile_Ptr     	= NULL;
@@ -2184,7 +2198,7 @@ main(int argc, char *argv[])
 		printf("---                                   U S A G E                                   ---\n");
 		printf("   - Parameter 1 : Input File                                          [Mandatory]\n");
 		printf("   - Parameter 2 : Accounting Date in YYYYMMDD Format                  [Mandatory]\n");
-		printf("   - Parameter 3 : Site : CASA                                         [Optionnal]\n");
+		printf("   - Parameter 3 : Site : CASA or LCL                                  [Optionnal]\n");
 		return EXIT_ERR;
 	}
 	else
@@ -2194,26 +2208,23 @@ main(int argc, char *argv[])
 		
 		if (argc == 2+1)
 		{
-			printf("Site(if NULL => CACIB else CASA): NULL => CACIB\n");
+			printf("Site(if NULL => CACIB else CASA or LCL): NULL => CACIB\n");
 		}
 		if (argc == 3+1)
 		{
-			printf("Site(if NULL => CACIB else CASA): %s\n", argv[3]);
+			printf("Site(if NULL => CACIB else CASA or LCL): %s\n", argv[3]);
 		}
 		
 	}
 	/* Checking Parameters */
 	printf("Checking Parameters ...\n");
 	
-	// Input File - first argument passed to script
-	//malloc - memory allocation is used to dynamically allocate a single large block of memory with the specified size.
-	InputFile_Name = (char*) malloc(strlen(argv[1]) * sizeof(char));
-	//copies input file to memory pointed by InputFile_Name
+	// Input File
+	InputFile_Name = (char*) malloc(strlen(argv[1]) * sizeof(char));        
    	strncpy(InputFile_Name, argv[1], strlen(argv[1]));
 	InputFile_Name[strlen(argv[1])] = '\0';
 
-	// Accounting Date - second argument passed to script
-	//copies date(Second argument) to memory pointed by Accounting_Date
+	// Accounting Date
 	strncpy(Accounting_Date, argv[2], DATE_LENGTH);
 	Accounting_Date[DATE_LENGTH] = '\0';
 	if (! isValidInputDate(Accounting_Date))
@@ -2233,9 +2244,20 @@ main(int argc, char *argv[])
 	{
 			if (strcmp(argv[3], "CASA") != 0 )
 			{
-				printf("---                    U S A G E                    ---\n");
-				printf("   Enter a Valid Site [NULL] or [CASA]\n");
-				return EXIT_ERR;
+				if (strcmp(argv[3], "LCL") != 0 )
+				{
+					printf("---                    U S A G E                    ---\n");
+					printf("   Enter a Valid Site [NULL] or [CASA] or [LCL]\n");
+					return EXIT_ERR;
+				}
+				else
+				{
+					strcpy(ENTITY,"LCL");
+				 	memcpy(strRCA_CPT_FILE_NAME,REF_RCA_CPT_FILE_NAME, 16);
+					printf("le fichier plan de compte est : %s  ENTITY :%s \n",strRCA_CPT_FILE_NAME,ENTITY);
+					//memcpy(strRCA_CPT_FILE_NAME,REF_RCA_CPT_CAS_FILE_NAME, 19);
+					//printf("le fichier plan de compte est : %s\n",strRCA_CPT_FILE_NAME);
+				}
 			}
 			else
 			{			
@@ -2371,7 +2393,7 @@ main(int argc, char *argv[])
 	}	
 	
 	/* Opening Ouput File */
-	OutputFile_Name = (char*) malloc((strlen(argv[1]) + strlen(OUTPUT_FILE_EXTENSION)) * sizeof(char));
+	OutputFile_Name = (char*) malloc((1 + strlen(argv[1]) + strlen(OUTPUT_FILE_EXTENSION)) * sizeof(char));
 	strcpy(OutputFile_Name, InputFile_Name);
 	strcat(OutputFile_Name, OUTPUT_FILE_EXTENSION);
 	printf("Opening Output File ........... : %s\n", OutputFile_Name);
@@ -2387,17 +2409,15 @@ main(int argc, char *argv[])
 	InitializeLOTHashKeyTable();
 	
 	/* Handling Input Data and Creating Output File */
-	//copies MAX_INPUT_REC_LENGTH number of characters from InputFile_Ptr to the string pointed by Input_Record_Struct
 	while (fgets((char*) &Input_Record_Struct, MAX_INPUT_REC_LENGTH, InputFile_Ptr) != NULL)
 	{
-		if (strlen(Input_Record_Struct.Input_Record) > 1) //check whether the length of the array Input_Record is > 1 or not 
+		if (strlen(Input_Record_Struct.Input_Record) > 1)
 		{
 			// Handle only not empty Records
 			Record_Number++;
 			if (strlen(Input_Record_Struct.Input_Record) == iInputRecordLength)
 			{
 				// Create Output Record
-				//memset - fill a block of memory with a particular value
 				memset(Output_Record_Struct.Output_Header, ' ', HEADER_LENGTH);
 				memset(Output_Record_Struct.Output_Record, ' ', MAX_INPUT_REC_LENGTH + 3 * (SIGN_FIELD_LENGTH + DECIMAL_NR_FIELD_LENGTH) + CD_TYPIMP_FIELD_LENGTH + CD_TYPEI_FIELD_LENGTH + CD_TVA_APP_FIELD_LENGTH);
 				if (Create_Output_Record(Input_Record_Struct.Input_Record, (char *) &Output_Record_Struct) == EXIT_ERR)

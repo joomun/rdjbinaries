@@ -169,40 +169,101 @@ def lz_trim(s: str) -> str:
     return s.lstrip('0') or '0'
 
 
-def format_field(value: str, field_format: int, field_length: int) -> bytes:
-    """Format a field according to format type"""
+def convert_input_field(input_value: str, field_format: int, field_length_input: int, field_length_output: int) -> bytes:
+    """Convert and format input field matching C logic"""
+    work_value = input_value.strip() if input_value else ""
+    
     if field_format == FORMAT_SKIP:
-        return value.encode('latin1')[:field_length].ljust(field_length)
+        # Unchanged original value
+        return input_value.encode('latin1')[:field_length_input].ljust(field_length_output)
     
-    elif field_format == FORMAT_CHAR_ED:  # Right space filled
-        return value.encode('latin1')[:field_length].ljust(field_length)
+    elif field_format == FORMAT_CHAR_ED:  # String right space filled
+        encoded = work_value.encode('latin1')
+        return encoded[:field_length_output].ljust(field_length_output)
     
-    elif field_format == FORMAT_CHAR_EG:  # Left space filled
-        return value.encode('latin1')[:field_length].rjust(field_length)
+    elif field_format == FORMAT_CHAR_EG:  # String left space filled
+        encoded = work_value.encode('latin1')
+        return encoded[:field_length_output].rjust(field_length_output)
     
-    elif field_format == FORMAT_ENTIER_EG:  # Unsigned numeric left spaces
-        return value.encode('latin1')[:field_length].rjust(field_length)
+    elif field_format == FORMAT_ENTIER_EG:  # Unsigned numeric with left spaces
+        is_num, sign = is_numeric(work_value)
+        if is_num:
+            cleaned = lz_trim(work_value.lstrip('+-'))
+            return cleaned.encode('latin1')[:field_length_output].rjust(field_length_output)
+        else:
+            return input_value.encode('latin1')[:field_length_input].ljust(field_length_output)
     
-    elif field_format == FORMAT_ENTIER_ZG:  # Unsigned numeric left zeroes
-        return value.encode('latin1')[:field_length].rjust(field_length, b'0')
+    elif field_format == FORMAT_ENTIER_ZG:  # Unsigned numeric with left zeroes
+        is_num, sign = is_numeric(work_value)
+        if is_num:
+            cleaned = lz_trim(work_value.lstrip('+-'))
+            return cleaned.encode('latin1')[:field_length_output].rjust(field_length_output, b'0')
+        else:
+            return input_value.encode('latin1')[:field_length_input].ljust(field_length_output)
     
     elif field_format == FORMAT_ENTIER_SG:  # Signed numeric left spaces, sign at left
-        return value.encode('latin1')[:field_length].rjust(field_length)
+        is_num, sign = is_numeric(work_value)
+        if is_num:
+            cleaned = lz_trim(work_value.lstrip('+-'))
+            sign_char = b'-' if sign < 0 else b'+'
+            output = bytearray(b' ' * field_length_output)
+            output[0:1] = sign_char
+            output[field_length_output - len(cleaned):] = cleaned.encode('latin1')[:field_length_output - 1]
+            return bytes(output)
+        else:
+            return input_value.encode('latin1')[:field_length_input].ljust(field_length_output)
     
     elif field_format == FORMAT_ENTIER_SZG:  # Signed numeric left zeroes, sign at left
-        return value.encode('latin1')[:field_length].rjust(field_length, b'0')
+        is_num, sign = is_numeric(work_value)
+        if is_num:
+            cleaned = lz_trim(work_value.lstrip('+-'))
+            sign_char = b'-' if sign < 0 else b'+'
+            output = bytearray(b'0' * field_length_output)
+            output[0:1] = sign_char
+            output[field_length_output - len(cleaned):] = cleaned.encode('latin1')[:field_length_output - 1]
+            return bytes(output)
+        else:
+            return input_value.encode('latin1')[:field_length_input].ljust(field_length_output)
     
     elif field_format == FORMAT_ENTIER_SD:  # Signed numeric left spaces, sign at right
-        return value.encode('latin1')[:field_length].rjust(field_length)
+        is_num, sign = is_numeric(work_value)
+        if is_num:
+            cleaned = lz_trim(work_value.lstrip('+-'))
+            sign_char = b'-' if sign < 0 else b'+'
+            output = bytearray(b' ' * field_length_output)
+            output[field_length_output - len(cleaned) - 1:field_length_output - 1] = cleaned.encode('latin1')[:field_length_output - 1]
+            output[field_length_output - 1:] = sign_char
+            return bytes(output)
+        else:
+            return input_value.encode('latin1')[:field_length_input].ljust(field_length_output)
     
     elif field_format == FORMAT_ENTIER_SZD:  # Signed numeric left zeroes, sign at right
-        return value.encode('latin1')[:field_length].rjust(field_length, b'0')
+        is_num, sign = is_numeric(work_value)
+        if is_num:
+            cleaned = lz_trim(work_value.lstrip('+-'))
+            sign_char = b'-' if sign < 0 else b'+'
+            output = bytearray(b'0' * field_length_output)
+            output[field_length_output - len(cleaned) - 1:field_length_output - 1] = cleaned.encode('latin1')[:field_length_output - 1]
+            output[field_length_output - 1:] = sign_char
+            return bytes(output)
+        else:
+            return input_value.encode('latin1')[:field_length_input].ljust(field_length_output)
     
     elif field_format == FORMAT_AMOUNT_3DEC:
-        return value.encode('latin1')[:field_length].ljust(field_length)
+        # Amount with 3 decimals format: Sign + Amount (18) + Decimal indicator (1)
+        success, cleaned, sign, dec_num = parse_amount(input_value)
+        if success:
+            output = bytearray(b'0' * field_length_output)
+            output[0:1] = (b'-' if sign < 0 else b'+')
+            output[field_length_output - len(cleaned) - 1:field_length_output - 1] = cleaned.encode('latin1')[:field_length_output - 1]
+            output[field_length_output - 1:] = str(dec_num).encode('latin1')
+            return bytes(output)
+        else:
+            return input_value.encode('latin1')[:field_length_input].ljust(field_length_output)
     
     else:
-        return value.encode('latin1')[:field_length].ljust(field_length)
+        # Unknown format - return original
+        return input_value.encode('latin1')[:field_length_input].ljust(field_length_output)
 
 
 def parse_amount(amount_str: str) -> Tuple[bool, str, int, int]:
@@ -238,52 +299,66 @@ def parse_amount(amount_str: str) -> Tuple[bool, str, int, int]:
         return False, amount_str, 0, 0
 
 
-def correct_format_amount(amount_str: str, cur_decimal_nr: str) -> str:
+def correct_format_amount(amount_bytes: bytes, cur_decimal_nr: str) -> bytes:
     """
     Correct amount format based on currency decimal positions
-    Returns formatted amount string with sign, amount, and decimal indicator
+    amount_bytes should be the output from convert_input_field for amount3DEC format
+    Returns formatted amount bytes with sign, amount, and decimal indicator
     """
-    amount_length = len(amount_str) - 1
-    amt_decimal_nr = amount_str[amount_length] if amount_length >= 0 else '3'
+    try:
+        amount_str = amount_bytes.decode('latin1').strip()
+    except:
+        return amount_bytes
+    
+    if not amount_str or len(amount_str) < 2:
+        return amount_bytes
+    
+    # Extract sign and amount
+    sign_char = amount_str[0]
+    amount_part = amount_str[1:].strip()
+    
+    # Last char should be decimal number from conversion
+    amt_decimal_nr = amount_str[-1] if amount_str[-1].isdigit() else '3'
     
     cur_dec = int(cur_decimal_nr) if cur_decimal_nr.isdigit() else 3
     amt_dec = int(amt_decimal_nr) if amt_decimal_nr.isdigit() else 3
     
     if cur_dec == amt_dec:
-        # Same decimal positions
-        output = bytearray(b'0' * 20)
-        output[0:1] = amount_str[0:1].encode('latin1')  # Sign
-        start_pos = 1 + 3 - cur_dec
-        output[1:1 + AMOUNT_FIELD_LENGTH] = amount_str[start_pos:start_pos + AMOUNT_FIELD_LENGTH].encode('latin1')
-        output[1 + AMOUNT_FIELD_LENGTH:1 + AMOUNT_FIELD_LENGTH + 1] = AMOUNT_DECIMAL_NR.encode('latin1')
-        return output[:20].decode('latin1')
+        # Same decimal positions - return as is
+        return amount_bytes[:20].ljust(20, b'0')
     
     elif cur_dec > amt_dec:
         # Currency has more decimals
         diff = cur_dec - amt_dec
         output = bytearray(b'0' * 20)
-        output[0:1] = amount_str[0:1].encode('latin1')  # Sign
-        output[1:1 + AMOUNT_FIELD_LENGTH - diff] = amount_str[1 + diff:1 + AMOUNT_FIELD_LENGTH].encode('latin1')
-        output[1 + AMOUNT_FIELD_LENGTH:1 + AMOUNT_FIELD_LENGTH + 1] = AMOUNT_DECIMAL_NR.encode('latin1')
-        return output[:20].decode('latin1')
+        output[0:1] = sign_char.encode('latin1')
+        # Shift amount right by diff positions
+        start_idx = 1 + diff
+        if start_idx < len(amount_part) + 1:
+            output[1:1 + len(amount_part)] = amount_part.encode('latin1')[:19]
+        output[19:20] = AMOUNT_DECIMAL_NR.encode('latin1')
+        return bytes(output)
     
     else:
         # Currency has fewer decimals - need to round
         diff = amt_dec - cur_dec
-        exp = 3 - cur_dec  # Must have 3 decimals
+        exp = 3 - cur_dec
         
-        amount_val = amount_str[1:1 + AMOUNT_FIELD_LENGTH]
-        numerator = float(amount_val)
+        try:
+            numerator = float(amount_part) if amount_part.isdigit() else 0
+        except:
+            return amount_bytes
+        
         denominator = pow(10, diff)
         ratio = round_custom(numerator / denominator)
         
         amount_formatted = f"{ratio:018.0f}"
         
         output = bytearray(b'0' * 20)
-        output[0:1] = amount_str[0:1].encode('latin1')  # Sign
-        output[1:1 + AMOUNT_FIELD_LENGTH - exp] = amount_formatted[exp:AMOUNT_FIELD_LENGTH].encode('latin1')
-        output[1 + AMOUNT_FIELD_LENGTH:1 + AMOUNT_FIELD_LENGTH + 1] = AMOUNT_DECIMAL_NR.encode('latin1')
-        return output[:20].decode('latin1')
+        output[0:1] = sign_char.encode('latin1')
+        output[1:1 + len(amount_formatted) - exp] = amount_formatted[exp:].encode('latin1')[:19]
+        output[19:20] = AMOUNT_DECIMAL_NR.encode('latin1')
+        return bytes(output)
 
 
 def build_hash_key(key: str) -> int:
@@ -567,151 +642,132 @@ def process_record(
     appli_emet = ''
     
     # Process each field
-    for i, field in enumerate(field_defs):
-        if field['length_input'] <= 0:
-            continue
+    field_idx = 0
+    while field_idx < len(field_defs):
+        field = field_defs[field_idx]
         
-        # Extract input field
-        start = field['start_pos_input']
-        end = start + field['length_input']
-        
-        if end > len(line):
-            return None  # Invalid record length
-        
-        input_field = line[start:end]
-        
-        # Process based on field name
-        if field['name'] == 'MAI_DEV_IMP':
-            dev_imp = input_field.strip()
-            if dev_imp == EMPTY_CURRENCY or not dev_imp:
-                dev_imp_decimal = '3'
-            else:
-                dev_imp_decimal = currency_table.get(dev_imp, '3')
-            output_field = format_field(input_field, field['format'], field['length_output'])
-            output[field['start_pos_output']:field['start_pos_output'] + field['length_output']] = output_field
-        
-        elif field['name'] == 'MAI_MNT_IMP':
-            # Parse and format amount
-            success, amt_val, sign, dec_num = parse_amount(input_field)
-            if success:
-                # Format as amount with sign and decimal
-                sign_char = '-' if sign < 0 else '+'
-                formatted = sign_char + amt_val.zfill(AMOUNT_FIELD_LENGTH) + str(dec_num)
-                corrected = correct_format_amount(formatted, dev_imp_decimal)
-                output[field['start_pos_output']:field['start_pos_output'] + field['length_output']] = corrected.encode('latin1')
-            else:
-                output_field = format_field(input_field, field['format'], field['length_output'])
-                output[field['start_pos_output']:field['start_pos_output'] + field['length_output']] = output_field
-        
-        elif field['name'] == 'MAI_DEV_GES':
-            dev_ges = input_field.strip()
-            if dev_ges == EMPTY_CURRENCY or not dev_ges:
-                dev_ges_decimal = '3'
-            else:
-                dev_ges_decimal = currency_table.get(dev_ges, '3')
-            output_field = format_field(input_field, field['format'], field['length_output'])
-            output[field['start_pos_output']:field['start_pos_output'] + field['length_output']] = output_field
-        
-        elif field['name'] == 'MAI_MNT_GES':
-            success, amt_val, sign, dec_num = parse_amount(input_field)
-            if success:
-                sign_char = '-' if sign < 0 else '+'
-                formatted = sign_char + amt_val.zfill(AMOUNT_FIELD_LENGTH) + str(dec_num)
-                corrected = correct_format_amount(formatted, dev_ges_decimal)
-                output[field['start_pos_output']:field['start_pos_output'] + field['length_output']] = corrected.encode('latin1')
-            else:
-                output_field = format_field(input_field, field['format'], field['length_output'])
-                output[field['start_pos_output']:field['start_pos_output'] + field['length_output']] = output_field
-        
-        elif field['name'] == 'MAI_DEV_CTP':
-            dev_ctp = input_field.strip()
-            if dev_ctp == EMPTY_CURRENCY or not dev_ctp:
-                dev_ctp_decimal = '3'
-            else:
-                dev_ctp_decimal = currency_table.get(dev_ctp, '3')
-            output_field = format_field(input_field, field['format'], field['length_output'])
-            output[field['start_pos_output']:field['start_pos_output'] + field['length_output']] = output_field
-        
-        elif field['name'] == 'MAI_MNT_NOM':
-            success, amt_val, sign, dec_num = parse_amount(input_field)
-            if success:
-                sign_char = '-' if sign < 0 else '+'
-                formatted = sign_char + amt_val.zfill(AMOUNT_FIELD_LENGTH) + str(dec_num)
-                corrected = correct_format_amount(formatted, dev_ges_decimal)  # Note: uses dev_ges_decimal
-                output[field['start_pos_output']:field['start_pos_output'] + field['length_output']] = corrected.encode('latin1')
-            else:
-                output_field = format_field(input_field, field['format'], field['length_output'])
-                output[field['start_pos_output']:field['start_pos_output'] + field['length_output']] = output_field
-        
-        elif field['name'] == 'MAI_DAT_OPE':
-            dat_ope = input_field[:4]  # First 4 chars (year)
-            id_lot = input_field[:DATE_LENGTH]  # Full date (8 chars)
-            output_field = format_field(input_field, field['format'], field['length_output'])
-            output[field['start_pos_output']:field['start_pos_output'] + field['length_output']] = output_field
-        
-        elif field['name'] == 'MAI_CPT_IMP':
-            # Look up DODGE account
-            compte_dodge = input_field.strip()
-            if compte_dodge in dodge_table:
-                top_bilan, hb_imputation, top_int_ext, tva = dodge_table[compte_dodge]
-            else:
-                logger.log_reject(f"Dodge Account NOT FOUND: {compte_dodge}")
-                hb_imputation = 'BR'
-                top_int_ext = 'E'
-                tva = '00'
+        if field['length_input'] > 0:
+            # Extract input field
+            start = field['start_pos_input']
+            end = start + field['length_input']
             
-            # Update id_lot
-            id_lot += hb_imputation + top_int_ext
+            if end > len(line):
+                return None  # Invalid record length
             
-            output_field = format_field(input_field, field['format'], field['length_output'])
+            input_field = line[start:end]
+            
+            # Convert field according to format
+            output_field = convert_input_field(
+                input_field, 
+                field['format'], 
+                field['length_input'],
+                field['length_output']
+            )
             output[field['start_pos_output']:field['start_pos_output'] + field['length_output']] = output_field
             
-            # Add extra fields for CD_TYPIMP, CD_TYPEI, CD_TVA_APP
-            if field['field_type'] == ADD_CD_TYPIMP_TYPEI_TVA:
-                # Next 3 fields are the added fields
-                idx_typimp = i + 1
-                idx_typei = i + 2
-                idx_tva = i + 3
+            # Handle special fields
+            if field['name'] == 'MAI_DEV_IMP':
+                dev_imp = input_field.strip()
+                if dev_imp == EMPTY_CURRENCY or not dev_imp:
+                    dev_imp_decimal = '3'
+                else:
+                    dev_imp_decimal = currency_table.get(dev_imp, '3')
+            
+            elif field['name'] == 'MAI_MNT_IMP':
+                # Correct amount format based on currency
+                corrected = correct_format_amount(output_field, dev_imp_decimal)
+                output[field['start_pos_output']:field['start_pos_output'] + field['length_output']] = corrected
+            
+            elif field['name'] == 'MAI_DEV_GES':
+                dev_ges = input_field.strip()
+                if dev_ges == EMPTY_CURRENCY or not dev_ges:
+                    dev_ges_decimal = '3'
+                else:
+                    dev_ges_decimal = currency_table.get(dev_ges, '3')
+            
+            elif field['name'] == 'MAI_MNT_GES':
+                # Correct amount format based on currency
+                corrected = correct_format_amount(output_field, dev_ges_decimal)
+                output[field['start_pos_output']:field['start_pos_output'] + field['length_output']] = corrected
+            
+            elif field['name'] == 'MAI_DEV_CTP':
+                dev_ctp = input_field.strip()
+                if dev_ctp == EMPTY_CURRENCY or not dev_ctp:
+                    dev_ctp_decimal = '3'
+                else:
+                    dev_ctp_decimal = currency_table.get(dev_ctp, '3')
+            
+            elif field['name'] == 'MAI_MNT_NOM':
+                # Correct amount format based on currency (uses dev_ges_decimal)
+                corrected = correct_format_amount(output_field, dev_ges_decimal)
+                output[field['start_pos_output']:field['start_pos_output'] + field['length_output']] = corrected
+            
+            elif field['name'] == 'MAI_DAT_OPE':
+                dat_ope = input_field[:4]  # First 4 chars (year)
+                id_lot = input_field[:DATE_LENGTH]  # Full date (8 chars)
+            
+            elif field['name'] == 'MAI_CPT_IMP':
+                # Look up DODGE account
+                compte_dodge = input_field.strip()
+                if compte_dodge in dodge_table:
+                    top_bilan, hb_imputation, top_int_ext, tva = dodge_table[compte_dodge]
+                else:
+                    logger.log_reject(f"Dodge Account NOT FOUND: {compte_dodge}")
+                    hb_imputation = 'BR'
+                    top_int_ext = 'E'
+                    tva = '00'
                 
-                if idx_typimp < len(field_defs):
-                    pos = field_defs[idx_typimp]['start_pos_output']
-                    length = field_defs[idx_typimp]['length_output']
-                    output[pos:pos + length] = hb_imputation.encode('latin1')[:length].ljust(length)
+                # Update id_lot with HB_IMPUTATION and TOP_INT_EXT
+                id_lot += hb_imputation + top_int_ext
                 
-                if idx_typei < len(field_defs):
-                    pos = field_defs[idx_typei]['start_pos_output']
-                    length = field_defs[idx_typei]['length_output']
-                    output[pos:pos + length] = top_int_ext.encode('latin1')[:length].ljust(length)
-                
-                if idx_tva < len(field_defs):
-                    pos = field_defs[idx_tva]['start_pos_output']
-                    length = field_defs[idx_tva]['length_output']
-                    output[pos:pos + length] = tva.encode('latin1')[:length].ljust(length)
-        
-        elif field['name'] == 'MAI_REF_OPE':
-            # Extract NUM_CRE (6 chars at position 11) and APPLI_EMET (3 chars at position 17)
-            if len(input_field) >= 20:
-                num_cre = input_field[11:11 + NUM_CRE_IN_CD_REFOPER_LENGTH]
-                id_lot += num_cre
-                appli_emet = input_field[17:20]
+                # Add extra fields for CD_TYPIMP, CD_TYPEI, CD_TVA_APP
+                if field['field_type'] == ADD_CD_TYPIMP_TYPEI_TVA:
+                    # Next 3 fields are synthetic fields (not from input)
+                    field_idx += 1
+                    if field_idx < len(field_defs):
+                        pos = field_defs[field_idx]['start_pos_output']
+                        length = field_defs[field_idx]['length_output']
+                        output[pos:pos + length] = hb_imputation.encode('latin1')[:length].ljust(length)
+                    
+                    field_idx += 1
+                    if field_idx < len(field_defs):
+                        pos = field_defs[field_idx]['start_pos_output']
+                        length = field_defs[field_idx]['length_output']
+                        output[pos:pos + length] = top_int_ext.encode('latin1')[:length].ljust(length)
+                    
+                    field_idx += 1
+                    if field_idx < len(field_defs):
+                        pos = field_defs[field_idx]['start_pos_output']
+                        length = field_defs[field_idx]['length_output']
+                        output[pos:pos + length] = tva.encode('latin1')[:length].ljust(length)
             
-            output_field = format_field(input_field, field['format'], field['length_output'])
-            output[field['start_pos_output']:field['start_pos_output'] + field['length_output']] = output_field
+            elif field['name'] == 'MAI_REF_OPE':
+                # Extract NUM_CRE (6 chars at position 11) and APPLI_EMET (3 chars at position 17)
+                if len(input_field) >= 20:
+                    num_cre = input_field[11:11 + NUM_CRE_IN_CD_REFOPER_LENGTH]
+                    id_lot += num_cre
+                    appli_emet = input_field[17:20]
         
-        else:
-            # Default field processing
-            output_field = format_field(input_field, field['format'], field['length_output'])
-            output[field['start_pos_output']:field['start_pos_output'] + field['length_output']] = output_field
+        field_idx += 1
     
-    # Build header
+    # Build header - follow exact C positions
     lot_num, id_ecritu = lot_manager.get_lot_and_id(appli_emet, id_lot)
     
+    # Header structure (169 bytes):
+    # 0-19: HEADER_CD_CRE ("CPTA_MARCHE")
+    # 20-23: DAT_OPE (4 chars)
+    # 24-26: APPLI_EMET (3 chars)
+    # 27-43: LOT_NUM (17 chars)
+    # 44-68: ID_COMPOST (25 chars - filler)
+    # 69-74: ID_ECRITU (6 chars)
+    # 75-168: CH_FILLER1 (94 chars - filler)
+    
     header = bytearray(b' ' * HEADER_LENGTH)
-    header[0:HEADER_CD_CRE_LENGTH] = HEADER_CD_CRE.encode('latin1')[:HEADER_CD_CRE_LENGTH].ljust(HEADER_CD_CRE_LENGTH)
-    header[HEADER_CD_CRE_LENGTH:HEADER_CD_CRE_LENGTH + 4] = dat_ope.encode('latin1')[:4].ljust(4)
-    header[HEADER_CD_CRE_LENGTH + 4:HEADER_CD_CRE_LENGTH + 7] = appli_emet.encode('latin1')[:3].ljust(3)
-    header[HEADER_CD_CRE_LENGTH + 7:HEADER_CD_CRE_LENGTH + 24] = f"{lot_num:017d}".encode('latin1')
-    header[HEADER_CD_CRE_LENGTH + HEADER_ID_LOT_LENGTH + HEADER_ID_COMPOST_LENGTH:HEADER_CD_CRE_LENGTH + HEADER_ID_LOT_LENGTH + HEADER_ID_COMPOST_LENGTH + HEADER_ID_ECRITU_LENGTH] = f"{id_ecritu:06d}".encode('latin1')
+    header[0:20] = HEADER_CD_CRE.encode('latin1')[:20].ljust(20)
+    header[20:24] = dat_ope.encode('latin1')[:4].ljust(4)
+    header[24:27] = appli_emet.encode('latin1')[:3].ljust(3)
+    header[27:44] = f"{lot_num:017d}".encode('latin1')[:17]
+    header[69:75] = f"{id_ecritu:06d}".encode('latin1')[:6]
     
     output[0:HEADER_LENGTH] = header
     

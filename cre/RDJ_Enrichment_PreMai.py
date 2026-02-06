@@ -2,7 +2,7 @@ import os
 import sys
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional
-from math import floor, ceil
+from math import floor, ceil, pow
 
 # --- Constants ---
 DATE_LENGTH = 8
@@ -273,8 +273,7 @@ def parse_amount(amount_str: str) -> Tuple[bool, str, int, int]:
     """
     work_amount = amount_str.strip()
     
-    # Find last non-space position
-    last_space_pos = len(work_amount)
+    # Find decimal symbol position
     decimal_symbol_pos = -1
     decimal_number = 0
     
@@ -286,7 +285,7 @@ def parse_amount(amount_str: str) -> Tuple[bool, str, int, int]:
     
     # If decimal symbol found, calculate decimal places
     if decimal_symbol_pos != -1:
-        decimal_number = last_space_pos - decimal_symbol_pos - 1
+        decimal_number = len(work_amount) - decimal_symbol_pos - 1
         # Remove decimal symbol
         work_amount = work_amount[:decimal_symbol_pos] + work_amount[decimal_symbol_pos + 1:]
     
@@ -302,79 +301,73 @@ def parse_amount(amount_str: str) -> Tuple[bool, str, int, int]:
 def correct_format_amount(amount_bytes: bytes, cur_decimal_nr: str) -> bytes:
     """
     Correct amount format based on currency decimal positions
-    amount_bytes should be the output from convert_input_field for amount3DEC format
-    Returns formatted amount bytes with sign, amount, and decimal indicator
+    Matches C's CorrectFormatAmount function exactly
     """
     try:
-        amount_str = amount_bytes.decode('latin1').strip()
+        i_str_amount = amount_bytes.decode('latin1')
     except:
         return amount_bytes
     
-    if not amount_str or len(amount_str) < 2:
-        return amount_bytes
+    if not i_str_amount or len(i_str_amount) < 2:
+        return amount_bytes.ljust(20)
     
-    # Extract sign and amount
-    sign_char = amount_str[0]
-    amount_part = amount_str[1:].strip()
+    l_cur_decimal_nr = cur_decimal_nr[0] if cur_decimal_nr else '3'
+    l_amt_decimal_nr = i_str_amount[-1] if len(i_str_amount) > 0 else '3'
+    l_amount_length = len(i_str_amount) - 1
     
-    # Last char should be decimal number from conversion
-    amt_decimal_nr = amount_str[-1] if amount_str[-1].isdigit() else '3'
+    o_str_amount = bytearray(b'0' * 20)
     
-    cur_dec = int(cur_decimal_nr) if cur_decimal_nr.isdigit() else 3
-    amt_dec = int(amt_decimal_nr) if amt_decimal_nr.isdigit() else 3
+    cur_dec = int(l_cur_decimal_nr)
+    amt_dec = int(l_amt_decimal_nr)
     
     if cur_dec == amt_dec:
-        # Same decimal positions - return as is
-        return amount_bytes[:20].ljust(20, b'0')
+        # Same decimal positions - copy as is
+        o_str_amount[0:1] = i_str_amount[0].encode('latin1')  # Sign
+        # Copy amount starting from position 1 + (3 - cur_dec)
+        src_start = 1 + (3 - cur_dec)
+        if src_start < len(i_str_amount):
+            copy_len = min(AMOUNT_FIELD_LENGTH - (3 - cur_dec), len(i_str_amount) - src_start)
+            o_str_amount[1:1 + copy_len] = i_str_amount[src_start:src_start + copy_len].encode('latin1')
+        o_str_amount[1 + AMOUNT_FIELD_LENGTH:] = AMOUNT_DECIMAL_NR.encode('latin1')
     
     elif cur_dec > amt_dec:
         # Currency has more decimals
         diff = cur_dec - amt_dec
-        output = bytearray(b'0' * 20)
-        output[0:1] = sign_char.encode('latin1')
-        # Shift amount right by diff positions
-        start_idx = 1 + diff
-        if start_idx < len(amount_part) + 1:
-            output[1:1 + len(amount_part)] = amount_part.encode('latin1')[:19]
-        output[19:20] = AMOUNT_DECIMAL_NR.encode('latin1')
-        return bytes(output)
+        o_str_amount[0:1] = i_str_amount[0].encode('latin1')  # Sign
+        # Copy from position 1 + diff
+        src_start = 1 + diff
+        if src_start < len(i_str_amount):
+            copy_len = min(AMOUNT_FIELD_LENGTH - diff, len(i_str_amount) - src_start)
+            o_str_amount[1:1 + copy_len] = i_str_amount[src_start:src_start + copy_len].encode('latin1')
+        o_str_amount[1 + AMOUNT_FIELD_LENGTH:] = AMOUNT_DECIMAL_NR.encode('latin1')
     
     else:
         # Currency has fewer decimals - need to round
         diff = amt_dec - cur_dec
         exp = 3 - cur_dec
         
+        # Extract amount without sign and decimal indicator
+        l_str_amount = i_str_amount[1:1 + AMOUNT_FIELD_LENGTH]
+        
         try:
-            numerator = float(amount_part) if amount_part.isdigit() else 0
+            numerator = float(l_str_amount)
+            denominator = pow(10, diff)
+            ratio = round_custom(numerator / denominator)
+            
+            # Format as 18-digit number
+            l_str_amount_formatted = f"{ratio:018.0f}"
+            
+            o_str_amount[0:1] = i_str_amount[0].encode('latin1')  # Sign
+            # Copy from position exp
+            copy_start = int(exp)
+            if copy_start < len(l_str_amount_formatted):
+                copy_len = min(AMOUNT_FIELD_LENGTH - int(exp), len(l_str_amount_formatted) - copy_start)
+                o_str_amount[1:1 + copy_len] = l_str_amount_formatted[copy_start:copy_start + copy_len].encode('latin1')
+            o_str_amount[1 + AMOUNT_FIELD_LENGTH:] = AMOUNT_DECIMAL_NR.encode('latin1')
         except:
-            return amount_bytes
-        
-        denominator = pow(10, diff)
-        ratio = round_custom(numerator / denominator)
-        
-        amount_formatted = f"{ratio:018.0f}"
-        
-        output = bytearray(b'0' * 20)
-        output[0:1] = sign_char.encode('latin1')
-        output[1:1 + len(amount_formatted) - exp] = amount_formatted[exp:].encode('latin1')[:19]
-        output[19:20] = AMOUNT_DECIMAL_NR.encode('latin1')
-        return bytes(output)
-
-
-def build_hash_key(key: str) -> int:
-    """Build hash key from string (simple hash function)"""
-    hash_val = 0
-    coef = 1
+            o_str_amount = bytearray(amount_bytes.ljust(20))
     
-    for i in range(len(key) - 1, -1, -1):
-        if len(key) - i <= 18:  # MAX_HASH_KEY_LENGTH
-            char_val = ord(key[i]) - ord(' ') if ord(key[i]) >= ord(' ') else ord(key[i])
-            hash_val += char_val * coef
-            coef *= 10
-        else:
-            break
-    
-    return hash_val
+    return bytes(o_str_amount)
 
 
 def load_field_definitions(config_dir: str, site: str) -> Tuple[List[Dict], int]:
@@ -636,7 +629,7 @@ def process_record(
     dev_ctp_decimal = '3'
     hb_imputation = 'BR'
     top_int_ext = 'E'
-    tva = '00'
+    tva = '  '  # FIX 1: Default TVA as 2 spaces, not '00'
     dat_ope = ''
     id_lot = ''
     appli_emet = ''
@@ -715,31 +708,37 @@ def process_record(
                     logger.log_reject(f"Dodge Account NOT FOUND: {compte_dodge}")
                     hb_imputation = 'BR'
                     top_int_ext = 'E'
-                    tva = '00'
+                    tva = '  '  # FIX 1: Use 2 spaces when DODGE not found
                 
                 # Update id_lot with HB_IMPUTATION and TOP_INT_EXT
                 id_lot += hb_imputation + top_int_ext
                 
-                # Add extra fields for CD_TYPIMP, CD_TYPEI, CD_TVA_APP
+                # FIX 2: Add extra fields for CD_TYPIMP, CD_TYPEI, CD_TVA_APP with proper field conversion
                 if field['field_type'] == ADD_CD_TYPIMP_TYPEI_TVA:
-                    # Next 3 fields are synthetic fields (not from input)
+                    # Next 3 fields are synthetic fields (generated from DODGE lookup)
                     field_idx += 1
-                    if field_idx < len(field_defs):
+                    if field_idx < len(field_defs) and field_defs[field_idx]['name'] == 'CD_TYPIMP':
+                        # Convert hb_imputation with proper field formatting
+                        converted = convert_input_field(hb_imputation, FORMAT_CHAR_ED, 2, CD_TYPIMP_FIELD_LENGTH)
                         pos = field_defs[field_idx]['start_pos_output']
                         length = field_defs[field_idx]['length_output']
-                        output[pos:pos + length] = hb_imputation.encode('latin1')[:length].ljust(length)
+                        output[pos:pos + length] = converted
                     
                     field_idx += 1
-                    if field_idx < len(field_defs):
+                    if field_idx < len(field_defs) and field_defs[field_idx]['name'] == 'CD_TYPEI':
+                        # Convert top_int_ext with proper field formatting
+                        converted = convert_input_field(top_int_ext, FORMAT_CHAR_ED, 1, CD_TYPEI_FIELD_LENGTH)
                         pos = field_defs[field_idx]['start_pos_output']
                         length = field_defs[field_idx]['length_output']
-                        output[pos:pos + length] = top_int_ext.encode('latin1')[:length].ljust(length)
+                        output[pos:pos + length] = converted
                     
                     field_idx += 1
-                    if field_idx < len(field_defs):
+                    if field_idx < len(field_defs) and field_defs[field_idx]['name'] == 'CD_TVA_APP':
+                        # Convert tva with proper field formatting
+                        converted = convert_input_field(tva, FORMAT_CHAR_ED, 2, CD_TVA_APP_FIELD_LENGTH)
                         pos = field_defs[field_idx]['start_pos_output']
                         length = field_defs[field_idx]['length_output']
-                        output[pos:pos + length] = tva.encode('latin1')[:length].ljust(length)
+                        output[pos:pos + length] = converted
             
             elif field['name'] == 'MAI_REF_OPE':
                 # Extract NUM_CRE (6 chars at position 11) and APPLI_EMET (3 chars at position 17)

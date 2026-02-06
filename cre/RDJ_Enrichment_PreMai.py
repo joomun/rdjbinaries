@@ -752,9 +752,31 @@ def main() -> int:
         return 1
     
     # Determine configuration directory
-    config_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "RDJ_DAT")
-    if not os.path.exists(config_dir):
-        config_dir = "RDJ_DAT"
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    env_dir = os.getenv("RDJ_DAT") or os.getenv("RDJ_DAT_DIR") or os.getenv("CONFIGURATION_DIRECTORY")
+    candidates = [
+        env_dir,
+        os.path.join(script_dir, "..", "RDJ_DAT"),
+        os.path.join(script_dir, "RDJ_DAT"),
+        os.path.join(os.getcwd(), "RDJ_DAT"),
+        os.path.join(os.getcwd(), "..", "RDJ_DAT"),
+        "RDJ_DAT",
+    ]
+    config_dir = None
+    for candidate in candidates:
+        if not candidate:
+            continue
+        candidate = os.path.abspath(candidate)
+        if os.path.isfile(os.path.join(candidate, "struct_premai.conf")):
+            config_dir = candidate
+            break
+    
+    if not config_dir:
+        expected = os.path.abspath("RDJ_DAT")
+        log_process("Error loading configuration: struct_premai.conf not found.")
+        log_process(f"Searched locations: {', '.join([c for c in candidates if c])}")
+        log_process(f"Set RDJ_DAT or RDJ_DAT_DIR to the directory that contains struct_premai.conf.")
+        return 1
     
     log_process(f"Configuration Directory: {config_dir}")
     
